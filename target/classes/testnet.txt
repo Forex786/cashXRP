@@ -1,0 +1,21 @@
+
+
+seed : 		snuSwr8EeTxfUdqRabpnH4mB2L9vE (private key)
+
+PayID : 	92madina$ripplex.money
+XRP Address :	rfXGfEEwoYS3HfPurT7JsXYr2VSnXWm2Z3
+X-Address :	T7kKFfV3iW8sweVAsTez2GKjRzsU6GJTdhsNg4ojNuQRhUz
+
+        // T7FtmWeshYay1t9kPKjBdhzogijYt6vPevoxs3y9rKKZ6tC// ripple testnet wallet
+       
+
+
+======================================
+
+Your Testnet Credentials
+Address
+rpjdUiVHoQAFiA42bH7DdRKYZ5pqNNLno5
+Secret
+ss4dPnwePEWXzuXnfdnUab1ZodHaN
+Balance
+1,000 XRP
