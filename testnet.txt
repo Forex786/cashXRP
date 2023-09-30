@@ -2,7 +2,7 @@
 
 seed : 		snuSwr8EeTxfUdqRabpnH4mB2L9vE (private key)
 
-PayID : 	92madina$ripplex.money
+
 XRP Address :	rfXGfEEwoYS3HfPurT7JsXYr2VSnXWm2Z3
 X-Address :	T7kKFfV3iW8sweVAsTez2GKjRzsU6GJTdhsNg4ojNuQRhUz
 
