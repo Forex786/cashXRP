@@ -11,10 +11,11 @@ import asyncio
 import re
 from threading import Thread
 from decimal import Decimal
+from xrpl.utils import hex_to_str, str_to_hex
 
 
 # number of times to repeat the send xrp transaction for test purposes
-tx_loop_count = 15      # GLOBAL variable      
+#tx_loop_count = 50      # GLOBAL variable      
 
 
 class XRPLMonitorThread(Thread):
@@ -36,10 +37,6 @@ class XRPLMonitorThread(Thread):
         asyncio.set_event_loop(self.loop)
         self.loop.set_debug(True)
 
-           
-        
-
-
     def run(self):
         """
         This thread runs a never-ending event-loop that monitors messages coming
@@ -57,6 +54,8 @@ class XRPLMonitorThread(Thread):
         self.account = address
         self.wallet = wallet
 
+        print ("watching : ", self.account)
+
         async with xrpl.asyncio.clients.AsyncWebsocketClient(self.url) as self.client:
             await self.on_connected()
             async for message in self.client:
@@ -69,7 +68,43 @@ class XRPLMonitorThread(Thread):
                         account=self.account,
                         ledger_index=message["ledger_index"]
                     ))
+
+                    # TODO
+                    #print ("watching1 :",response.result)
+
                     wx.CallAfter(self.gui.update_account, response.result["account_data"])
+
+    async def watch_xrpl_account2(self, address, wallet=None):
+        """
+        This is the task that opens the connection to the XRPL, then handles
+        incoming subscription messages by dispatching them to the appropriate
+        part of the GUI.
+        """
+        accountx = address
+        walletx = wallet
+
+        # TODO
+        #print ("watching2 : ", accountx)
+
+        async with xrpl.asyncio.clients.AsyncWebsocketClient(self.url) as self.client:
+            await self.on_connected()
+            async for message in self.client:
+                mtype = message.get("type")
+                if mtype == "ledgerClosed":
+                    wx.CallAfter(self.gui.update_ledger, message)
+                elif mtype == "transaction":
+                    wx.CallAfter(self.gui.add_tx_from_subscription, message)
+                    response = await self.client.request(xrpl.models.requests.AccountInfo(
+                        account=accountx,
+                        ledger_index=message["ledger_index"]
+                    ))
+
+                    # TODO
+                    # print ("watching2 :",response.result)
+
+                    wx.CallAfter(self.gui.update_account, response.result["account_data"])
+
+
 
     async def on_connected(self):
         """
@@ -118,6 +153,7 @@ class XRPLMonitorThread(Thread):
             "dtag": Destination Tag, as a string, optional
             "to": Destination address (classic or X-address)
             "amt": Amount of decimal XRP to send, as a string
+            "loopCNT": number of times to loop entered in dialog window # azhar
         }
         """
         dtag = paydata.get("dtag", "")
@@ -139,47 +175,51 @@ class XRPLMonitorThread(Thread):
         # rapidly if you track the sequence number more carefully.
         #####################################################################
         
-        tx = xrpl.models.transactions.Payment(
-                            account=self.account,
-                            destination=paydata["to"],
-                            amount=xrpl.utils.xrp_to_drops(paydata["amt"]),
-                            destination_tag=786
-                        )
-        
-        print (tx)
-
-
+       
         ## TODO azhar
+        
         ## excute multiple transactions and print out the Tx sequence number
+
+        tx_loop_count = int(paydata.get("loopCNT", "1"))
 
         print (f"\nLooop count set to : {tx_loop_count}\n")
 
-        for i in range( tx_loop_count ):
-
-            tx = xrpl.models.transactions.Payment(
-                            account=self.account,
-                            destination=paydata["to"],
-                            amount=xrpl.utils.xrp_to_drops(paydata["amt"]),
-                            ##amount=xrpl.utils.xrp_to_drops(i+1),
-                            destination_tag=i+1 + dtag
-                            )
-
-            tx_signed = await xrpl.asyncio.transaction.autofill_and_sign(tx, self.client, self.wallet)
-            
-            ## The transaction hash is created using the contents of the signed transaction
-            tx_hash = tx_signed.get_hash()
-            ## print(tx_hash)
+        mymemo = xrpl.models.transactions.Memo(memo_data= str_to_hex("PreFund credit"), memo_type=str_to_hex("cashXRP") )
         
-            ## TODO 
-            txSeq = getattr(tx_signed, "sequence")
+        print (mymemo)
+
+        # NB: cannot send to self
+        if self.account == paydata["to"] :
+            print("\n*******************")
+            print("\nCannot send to self !")
+            print("\n*******************")
+        else :
+            for i in range( tx_loop_count ):
+
+                tx = xrpl.models.transactions.Payment(
+                                account=self.account,
+                                destination=paydata["to"],
+                                amount=xrpl.utils.xrp_to_drops(paydata["amt"]),
+                                destination_tag=i+1 + dtag,
+                                memos= [mymemo]
+                                )
+
+                tx_signed = await xrpl.asyncio.transaction.autofill_and_sign(tx, self.client, self.wallet)
+                
+                ## The transaction hash is created using the contents of the signed transaction
+                tx_hash = tx_signed.get_hash()
+                ## print(tx_hash)
             
-            ## print (f"{i+1} - Pending tx#: {txSeq}")
-            print (f"{i+1} - Pending tx#: {txSeq}, Tx hash: {tx_hash}")
+                ## TODO 
+                txSeq = getattr(tx_signed, "sequence")
+                
+                ## print (f"{i+1} - Pending tx#: {txSeq}")
+                print (f"{i+1} - Pending txSeq: {txSeq}, Tx hash: {tx_hash}")
+                
+                await xrpl.asyncio.transaction.submit(tx_signed, self.client)
+                wx.CallAfter(self.gui.add_pending_tx, tx_signed, i+1)
             
-            await xrpl.asyncio.transaction.submit(tx_signed, self.client)
-            wx.CallAfter(self.gui.add_pending_tx, tx_signed, i+1)
-        
-        print ("\nSend XRP finished.....\n")
+            print ("\nSend XRP finished.....\n")
 
 
 
@@ -211,21 +251,31 @@ class SendXRPDialog(wx.Dialog):
     direct XRP-to-XRP payment on the XRPL.
     """
     def __init__(self, parent):
-        wx.Dialog.__init__(self, parent, title="Send XRP")
+
+        defDest = "rUBfUoui7NM9DzVy1a3MeLAAG8s7H2Thch"
+        wx.Dialog.__init__(self, parent, title="Send XRP : default destination = "+defDest, size=wx.Size(500,250) )
+                
         sizer = AutoGridBagSizer(self)
+       # self.Size=wx.Size(400,400) 
+
         self.parent = parent
 
         lbl_to = wx.StaticText(self, label="To (Address):")
         lbl_dtag = wx.StaticText(self, label="Destination Tag:")
         lbl_amt = wx.StaticText(self, label="Amount of XRP:")
+        lbl_loop = wx.StaticText(self, label="loop count:") # azhar
 
     ## TODO
-        self.txt_to = wx.TextCtrl(self , value="rLgWybVe8hgY6yNAXCmyxJiobX4b11e6hC")
+        self.txt_to = wx.TextCtrl(self , value=defDest, size=wx.Size(270,24))
 
         self.txt_dtag = wx.TextCtrl(self, value="1000000")
-        self.txt_amt = wx.SpinCtrlDouble(self, value="20.0", min=0.000001)
+        self.txt_amt = wx.SpinCtrlDouble(self, value="2.0", min=0.000001)
         self.txt_amt.SetDigits(6)
         self.txt_amt.SetIncrement(1.0)
+
+        #TODO azhar
+        self.txt_loopCNT = wx.TextCtrl(self, value="10")
+        
 
         # The "Send" button is functionally an "OK" button except for the text.
         self.btn_send = wx.Button(self, wx.ID_OK, label="Send")
@@ -234,8 +284,9 @@ class SendXRPDialog(wx.Dialog):
         sizer.BulkAdd(((lbl_to, self.txt_to),
                        (lbl_dtag, self.txt_dtag),
                        (lbl_amt, self.txt_amt),
+                       (lbl_loop, self.txt_loopCNT), ## azhar                       
                        (btn_cancel, self.btn_send)) )
-        sizer.Fit(self)
+        #sizer.Fit(self)
 
         self.txt_dtag.Bind(wx.EVT_TEXT, self.on_dest_tag_edit)
         self.txt_to.Bind(wx.EVT_TEXT, self.on_to_edit)
@@ -249,6 +300,8 @@ class SendXRPDialog(wx.Dialog):
             "to": self.txt_to.GetValue().strip(),
             "dtag": self.txt_dtag.GetValue().strip(),
             "amt": self.txt_amt.GetValue(),
+            "loopCNT": self.txt_loopCNT.GetValue(),
+            
         }
 
     def on_to_edit(self, event):
@@ -282,7 +335,7 @@ class TWaXLFrame(wx.Frame):
     user interface, main frame.
     """
     def __init__(self, url, test_network=True):
-        wx.Frame.__init__(self, None, title="TWaXL v2.0", size=wx.Size(800,400))
+        wx.Frame.__init__(self, None, title="TWaXL v2.1", size=wx.Size(800,400))
 
         self.test_network = test_network
         # The ledger's current reserve settings. To be filled in later.
@@ -294,11 +347,22 @@ class TWaXLFrame(wx.Frame):
         # Pop up to ask user for their account ---------------------------------
         address, wallet = self.prompt_for_account()
         self.classic_address = address
+        
+        # TODO add second wallet to subcribe to.
+        # address2, wallet2 = self.prompt_for_account()
+        # self.classic_address2 = address2
 
         # Start background thread for updates from the ledger ------------------
         self.worker = XRPLMonitorThread(url, self)
         self.worker.start()
+
+
+        print("address : ", address)
+        print("wallet  : ", wallet)
+        
         self.run_bg_job(self.worker.watch_xrpl_account(address, wallet))
+        #self.run_bg_job(self.worker.watch_xrpl_account2(address2, wallet2))
+        
 
     def build_ui(self):
         """
@@ -348,7 +412,7 @@ class TWaXLFrame(wx.Frame):
 
         self.tx_list = wx.dataview.DataViewListCtrl(objs_panel)
         self.tx_list.AppendTextColumn("Confirmed")
-        self.tx_list.AppendTextColumn("Type")
+        self.tx_list.AppendTextColumn("Type/TAG")
         self.tx_list.AppendTextColumn("From")
         self.tx_list.AppendTextColumn("To")
         self.tx_list.AppendTextColumn("Value Delivered")
@@ -519,13 +583,20 @@ class TWaXLFrame(wx.Frame):
         confirmation_time = conf_dt.astimezone().strftime("%c")
 
         tx_hash = t["tx"]["hash"]
-        tx_type = t["tx"]["TransactionType"]
+        tx_type = t["tx"].get('TransactionType') + ": dTag# "+str(t["tx"].get('DestinationTag')) #  azhar2
         from_acct = t["tx"].get("Account") or ""
-        if from_acct == self.classic_address:
-            from_acct = f"(Me):{t['tx'].get('DestinationTag')}"
+
+        # print ("from: ", from_acct)
+
+        # if from_acct == self.classic_address:
+        #     from_acct = f"(Me):{from_acct}, {t['tx'].get('DestinationTag')}"
+
         to_acct = t["tx"].get("Destination") or ""
-        if to_acct == self.classic_address:
-            to_acct = "(Me)"
+
+        # print ("To : ",to_acct)
+
+        # if to_acct == self.classic_address:
+        #     to_acct = f"(Me):{to_acct}"
 
         delivered_amt = t["meta"].get("delivered_amount")
         if delivered_amt:
@@ -535,6 +606,7 @@ class TWaXLFrame(wx.Frame):
 
         cols = (confirmation_time, tx_type, from_acct, to_acct, delivered_amt,
                 tx_hash, str(t))
+        
         if prepend:
             self.tx_list.PrependItem(cols)
         else:
@@ -586,7 +658,7 @@ class TWaXLFrame(wx.Frame):
         # For example, if the account has issued tokens, it gets notified when
         # other users transfer those tokens among themselves.
         notif = wx.adv.NotificationMessage(title="New Transaction", message =
-                f"New {t['tx']['TransactionType']} transaction confirmed!")
+                f"New {t['tx']['TransactionType']} transaction confirmed!") 
         notif.SetFlags(wx.ICON_INFORMATION)
         notif.Show()
 
@@ -642,7 +714,5 @@ if __name__ == "__main__":
     app = wx.App()
     frame = TWaXLFrame(WS_URL, test_network=True)
     frame.Show()
-
-    print (f"\nLooop count set to : {tx_loop_count}\n")
     
     app.MainLoop()
