@@ -52,10 +52,10 @@ class XRPLMonitorThread(Thread):
                 elif mtype == "transaction":
 
                     # message contains the status of the tx & ledger and Tx details
-                    print(datetime.now().strftime("%H:%M:%S")," - ",message["transaction"]["hash"], 
+                    print(datetime.now().strftime("%H:%M:%S"),"-",message['transaction']['DestinationTag'],"- ",message["transaction"]["hash"], 
                           " : result = ",message["engine_result"],
                           " : validated = ",message["validated"]
-                          ,"\n")
+                          )
 
                     
 
