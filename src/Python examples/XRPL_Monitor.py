@@ -1,11 +1,14 @@
+
 # start a worker loop to monitor required XRPL addresses for new Tx's
 #
 #
 
+import ast
 from datetime import datetime
 import xrpl
 import asyncio
 from threading import Thread
+from class_mySQL  import MySQLConnector
 
 class XRPLMonitorThread(Thread):
     """
@@ -13,6 +16,9 @@ class XRPLMonitorThread(Thread):
     the main frame to be shown in the UI. Using a thread lets us maintain the
     responsiveness of the UI while doing work in the background.
     """
+
+    Tx_count = 0
+
     def __init__(self, url):
         Thread.__init__(self, daemon=True)
       
@@ -52,10 +58,13 @@ class XRPLMonitorThread(Thread):
                 elif mtype == "transaction":
 
                     # message contains the status of the tx & ledger and Tx details
-                    print(datetime.now().strftime("%H:%M:%S"),"-",message['transaction']['DestinationTag'],"- ",message["transaction"]["hash"], 
-                          " : result = ",message["engine_result"],
-                          " : validated = ",message["validated"]
+                    print(datetime.now().strftime("%H:%M:%S"),"-",
+                          message['transaction']['DestinationTag'],"-",
+                          message["transaction"]["hash"], 
+                          ":",message["engine_result"],
+                          ":",message["validated"]
                           )
+                    self.Tx_count = self.Tx_count + 1
 
                     
 
@@ -64,8 +73,6 @@ class XRPLMonitorThread(Thread):
         Set up initial subscriptions and print data from the
         ledger on startup. Requires that self.client be connected first.
         """
-
-        print("\nMonitpriong accounts: ",self.accounts,"\n")
 
         # Set up 2 subscriptions: all new ledgers, and any new transactions that
         # affect the chosen account(s).
@@ -81,18 +88,20 @@ class XRPLMonitorThread(Thread):
 
 
 async def main():
-    # endless loop to allow us to monitor the background Daemon thread
+    # endless loop to allow the background Daemon thread to stay alive in this
+    # non-GUI program.
+    # This loop emulates the GUI main loop.
     while True:
-        print (datetime.now().strftime("%H:%M:%S"))
+        print (datetime.now().strftime("%H:%M:%S"), " : Monitoring the XRPL....total Tx count ==>>", worker.Tx_count)
         await asyncio.sleep(60)
 
 ##########################################################################################################
 
 if __name__ == "__main__":
 
-    print ("\n ************  Press CTRL+c to eixt  ************\n")
+    print ("\n **** v1.3 ********  Press CTRL+c to eixt  ************\n")
 
-    print ("Daemon - Monitor XRPL Tx's started...", datetime.now().strftime("%Y:%M:%d %H:%M:%S"), "\n")
+    print ("Daemon - Monitor XRPL Tx's started at ", datetime.now().strftime("%Y:%M:%d %H:%M:%S"), "\n")
 
     WS_URL = "wss://s.altnet.rippletest.net:51233" # Testnet
     print("XRPL network : ", WS_URL, "\n")
@@ -101,21 +110,48 @@ if __name__ == "__main__":
     worker = XRPLMonitorThread(WS_URL) # creates an endless worker loop
     worker.start()
 
-    account1 = "rUxi1XtG7521a8eHH6gzcaMXBE6bCAzjqm"
-    account2 = "rLgWybVe8hgY6yNAXCmyxJiobX4b11e6hC"
-    account3 = "rUBfUoui7NM9DzVy1a3MeLAAG8s7H2Thch"
+    try:
+        mydb = MySQLConnector()
 
-    accounts_to_monitor = []
-    accounts_to_monitor.append(account1)
-    accounts_to_monitor.append(account2)
-    accounts_to_monitor.append(account3)
+        result = mydb.get_XRPL_Wallets_to_Monitor()
 
-    # add watch function to the endless loop
-    task = asyncio.run_coroutine_threadsafe(worker.watch_xrpl_account(accounts_to_monitor), worker.loop)
+        # Convert the string to a Python list
+        accounts_to_monitor = ast.literal_eval(result)
 
-    # start endless loop on the foreground thread.
-    # must be a call to an async function to allow us to use the "await" command
-    asyncio.run(main())
+        # create a blank list object
+        XRPL_addrs_to_monitor  = []
+
+        # TODO write the list to a dB log table.
+        print ("Monitoring XRPL addresses : ")
+
+        i = 0
+        for x in accounts_to_monitor:
+            i = i + 1
+            print (f"{i} : {x[0]} - Wallet ID : {x[1]} - {x[2]}")
+            XRPL_addrs_to_monitor.append(x[0])
+        
+        print("\n")
+
+
+        # add watch function to the endless loop
+        task = asyncio.run_coroutine_threadsafe(worker.watch_xrpl_account(XRPL_addrs_to_monitor), worker.loop)
+
+        # start endless loop on the foreground thread.
+        # must be a call to an async function to allow us to use the "await" command
+        try:
+                asyncio.run(main())
+        
+        except KeyboardInterrupt:
+        # This block will be executed if the user presses Ctrl+C
+            mydb.close_connection()
+            print ("mySQL dB connection closed.")
+    
+    except:
+        print ("mySQL dB error...")
+        mydb.close_connection()
+        
+
+# EOF
     
 
     
