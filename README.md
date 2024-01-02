@@ -1,4 +1,4 @@
 # my-XRP-Wallet
-XRP Wallet for Windows desktop
+cashXRP - your privacy preserved
 
-this code is a prototype to demonstrate the use of the XRPL API for creating wallets and sending/receiving XRP.
+this code is a prototype to demonstrate the use of the XRPL API for sending/receiving XRP with privacy.
